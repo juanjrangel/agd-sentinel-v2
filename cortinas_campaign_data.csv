@@ -1,0 +1,5 @@
+year,cohesion_kPa,friction_deg,condition,borehole,depth_m
+2017,18.5,30.8,pre-failure,S1,2.0-3.0
+2021,12.1,21.3,post-failure_moved_colluvium,S1,1.55-2.0
+2023,16.3,23.1,recovery,S2,2.0-2.5
+2025,17.2,26.1,continued_recovery,S1,1.5-2.0
