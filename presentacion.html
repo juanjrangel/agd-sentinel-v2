@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGD-Sentinel V2 · Avance 2 · Modelo Jerárquico Bayesiano</title>
+
+  <!-- Tailwind CSS v4 (build para navegador, versión fijada) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.4/dist/index.global.js"></script>
+
+  <!-- React 18 + ReactDOM + Babel (JSX en el navegador) -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+
+  <!-- Lucide Icons (build UMD para React; expone el global `LucideReact`).
+       Su wrapper UMD busca el global `react` en minúscula, por eso se aliasa antes de cargarlo. -->
+  <script>window.react = window.React;</script>
+  <script crossorigin src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body, #root { height: 100%; }
+    body {
+      margin: 0;
+      background: #070b14;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    .font-mono-sci { font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace; }
+
+    @keyframes inRight { from { opacity: 0; transform: translateX(36px); } to { opacity: 1; transform: none; } }
+    @keyframes inLeft  { from { opacity: 0; transform: translateX(-36px); } to { opacity: 1; transform: none; } }
+    @keyframes fadeUp  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    @keyframes pop     { 0% { transform: scale(0); opacity: 0; } 65% { transform: scale(1.35); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+    @keyframes growX   { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes pulseRing { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.4); opacity: 0; } }
+
+    .anim-in-right { animation: inRight .45s cubic-bezier(.22,.8,.3,1) both; }
+    .anim-in-left  { animation: inLeft .45s cubic-bezier(.22,.8,.3,1) both; }
+    .anim-fade-up  { animation: fadeUp .4s ease-out both; }
+    .anim-pop      { animation: pop .6s cubic-bezier(.3,1.4,.5,1) both; transform-box: fill-box; transform-origin: center; }
+    .anim-grow     { animation: growX .8s cubic-bezier(.22,.8,.3,1) both; transform-origin: left center; }
+    .pulse-ring    { animation: pulseRing 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+
+    /* Scrollbar discreto */
+    .thin-scroll::-webkit-scrollbar { width: 8px; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 8px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    /* Slider */
+    input[type=range].sci-range { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px; background: #1e293b; outline: none; }
+    input[type=range].sci-range::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #38bdf8; border: 3px solid #0b1220; box-shadow: 0 0 0 2px #38bdf8; cursor: pointer; }
+    input[type=range].sci-range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #38bdf8; border: 3px solid #0b1220; box-shadow: 0 0 0 2px #38bdf8; cursor: pointer; }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root">
+    <div style="height:100%;display:flex;align-items:center;justify-content:center;color:#64748b;font-family:sans-serif">
+      Cargando presentación…
+    </div>
+  </div>
+  <noscript>Esta presentación requiere JavaScript.</noscript>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+    /* =====================================================================
+     * 0. UTILIDADES, CONSTANTES FÍSICAS Y TOKENS DE DISEÑO
+     * ===================================================================== */
+
+    // Íconos Lucide: si un nombre no existe en la versión cargada, no se rompe la UI.
+    const Icon = ({ name, size = 18, className = '', ...rest }) => {
+      const Cmp = window.LucideReact && window.LucideReact[name];
+      return Cmp ? <Cmp size={size} className={className} aria-hidden="true" {...rest} /> : null;
+    };
+
+    // Talud infinito seco (mismos parámetros del informe).
+    const GAMMA = 19.01;                     // kN/m³ (promedio de la base)
+    const Z = 13;                            // m
+    const BETA = (30 * Math.PI) / 180;       // rad
+    const K_COH = GAMMA * Z * Math.sin(BETA) * Math.cos(BETA);   // denominador del término de cohesión
+    const rad = (d) => (d * Math.PI) / 180;
+    const termCohesion = (c) => c / K_COH;
+    const termFriccion = (phiDeg) => Math.tan(rad(phiDeg)) / Math.tan(BETA);
+
+    const PHI_PICO = 30.8;                   // Cortinas, t = 0
+    const PHI_RESIDUAL = 21.3;               // Cortinas, t = 3.84
+    const C_PICO = 18.5;
+    const C_RESIDUAL = 12.1;
+
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const fmt = (v, d = 2) => Number(v).toFixed(d);
+
+    // Interpolación lineal por tramos sobre pares [x, y].
+    const interp = (pts, x) => {
+      if (x <= pts[0][0]) return pts[0][1];
+      for (let i = 1; i < pts.length; i++) {
+        if (x <= pts[i][0]) {
+          const [x0, y0] = pts[i - 1];
+          const [x1, y1] = pts[i];
+          return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+        }
+      }
+      return pts[pts.length - 1][1];
+    };
+
+    // Φ(x) normal estándar (aprox. Abramowitz-Stegun 7.1.26).
+    const normCdf = (x) => {
+      const s = x < 0 ? -1 : 1;
+      const a = Math.abs(x) / Math.SQRT2;
+      const t = 1 / (1 + 0.3275911 * a);
+      const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a);
+      return 0.5 * (1 + s * y);
+    };
+
+    // Paleta sobria: azules, naranjas tenues y grises. Clases literales para que Tailwind las detecte.
+    const TONES = {
+      blue:   { text: 'text-sky-300',    soft: 'text-sky-200/80',   bg: 'bg-sky-400/10',    border: 'border-sky-400/30',    solid: 'bg-sky-400',    ring: 'ring-sky-400/40',    hex: '#38bdf8' },
+      indigo: { text: 'text-blue-300',   soft: 'text-blue-200/80',  bg: 'bg-blue-400/10',   border: 'border-blue-400/30',   solid: 'bg-blue-400',   ring: 'ring-blue-400/40',   hex: '#60a5fa' },
+      orange: { text: 'text-orange-300', soft: 'text-orange-200/80', bg: 'bg-orange-300/10', border: 'border-orange-300/30', solid: 'bg-orange-300', ring: 'ring-orange-300/40', hex: '#fdba74' },
+      gray:   { text: 'text-slate-300',  soft: 'text-slate-400',    bg: 'bg-slate-400/10',  border: 'border-slate-500/40',  solid: 'bg-slate-400',  ring: 'ring-slate-400/40',  hex: '#94a3b8' },
+      red:    { text: 'text-rose-300',   soft: 'text-rose-200/80',  bg: 'bg-rose-400/10',   border: 'border-rose-400/30',   solid: 'bg-rose-400',   ring: 'ring-rose-400/40',   hex: '#fb7185' },
+      green:  { text: 'text-emerald-300', soft: 'text-emerald-200/80', bg: 'bg-emerald-400/10', border: 'border-emerald-400/30', solid: 'bg-emerald-400', ring: 'ring-emerald-400/40', hex: '#6ee7b7' },
+    };
+
+    /* =====================================================================
+     * 1. COMPONENTES DE UI REUTILIZABLES
+     * ===================================================================== */
+
+    const Card = ({ className = '', children, tone = 'gray', ...rest }) => (
+      <div className={`rounded-2xl border ${TONES[tone].border} bg-slate-900/60 backdrop-blur-sm ${className}`} {...rest}>
+        {children}
+      </div>
+    );
+
+    const Chip = ({ tone = 'blue', icon, children, className = '' }) => (
+      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${TONES[tone].border} ${TONES[tone].bg} ${TONES[tone].text} ${className}`}>
+        {icon && <Icon name={icon} size={13} />}
+        {children}
+      </span>
+    );
+
+    const Stat = ({ value, label, tone = 'blue', sub, className = '' }) => (
+      <Card tone={tone} className={`p-4 sm:p-5 ${className}`}>
+        <div className={`font-mono-sci text-3xl sm:text-4xl font-bold leading-none ${TONES[tone].text}`}>{value}</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{label}</div>
+        {sub && <div className="mt-1 text-xs text-slate-500">{sub}</div>}
+      </Card>
+    );
+
+    const Bullet = ({ icon = 'ChevronRight', tone = 'blue', children }) => (
+      <li className="flex items-start gap-3 text-[15px] sm:text-base leading-snug text-slate-300">
+        <span className={`mt-0.5 shrink-0 ${TONES[tone].text}`}><Icon name={icon} size={18} /></span>
+        <span>{children}</span>
+      </li>
+    );
+
+    const Eq = ({ children, tone = 'blue', className = '' }) => (
+      <div className={`font-mono-sci rounded-xl border ${TONES[tone].border} bg-slate-950/70 px-4 py-3 text-[13px] sm:text-sm leading-relaxed ${TONES[tone].soft} overflow-x-auto thin-scroll ${className}`}>
+        {children}
+      </div>
+    );
+
+    const SegTabs = ({ options, value, onChange, tone = 'blue' }) => (
+      <div role="tablist" className="inline-flex flex-wrap rounded-xl border border-slate-700/70 bg-slate-950/60 p-1 gap-1">
+        {options.map((o) => {
+          const active = o.id === value;
+          return (
+            <button
+              key={o.id}
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(o.id)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors cursor-pointer ${
+                active ? `${TONES[tone].bg} ${TONES[tone].text} ring-1 ${TONES[tone].ring}` : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {o.icon && <Icon name={o.icon} size={14} />}
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+    // Marco común de cada diapositiva: kicker + título + subtítulo + contenido.
+    const SlideShell = ({ n, kicker, title, sub, children }) => (
+      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-5 py-6 sm:px-10 sm:py-8">
+        <div className="mb-5 sm:mb-7">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="font-mono-sci text-xs tracking-widest text-orange-300/90">{String(n).padStart(2, '0')}</span>
+            <span className="h-px w-8 bg-slate-700" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/90">{kicker}</span>
+          </div>
+          <h2 className="text-2xl font-bold leading-tight tracking-tight text-slate-50 sm:text-4xl">{title}</h2>
+          {sub && <p className="mt-2 max-w-3xl text-sm text-slate-400 sm:text-base">{sub}</p>}
+        </div>
+        {children}
+      </div>
+    );
+
+    /* =====================================================================
+     * 2. DIAPOSITIVAS
+     * ===================================================================== */
+
+    /* ---------- 01 · Portada ---------- */
+    const SlideCover = () => (
+      <div className="relative mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-5 py-8 sm:px-10">
+        {/* Motivo decorativo: recta de deterioro con cono de incertidumbre */}
+        <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-60" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="coverCone" x1="0" x2="1">
+              <stop offset="0" stopColor="#fdba74" stopOpacity="0.20" />
+              <stop offset="1" stopColor="#38bdf8" stopOpacity="0.04" />
+            </linearGradient>
+          </defs>
+          <polygon points="0,250 1000,420 1000,600 0,330" fill="url(#coverCone)" transform="translate(0,-40)" />
+          <line x1="0" y1="250" x2="1000" y2="510" stroke="#fdba74" strokeOpacity="0.45" strokeWidth="2" strokeDasharray="6 8" transform="translate(0,-40)" />
+          {[...Array(27)].map((_, i) => (
+            <circle key={i} cx={60 + i * 35} cy={140 + ((i * 53) % 90) + i * 4} r="3" fill="#38bdf8" fillOpacity="0.35" />
+          ))}
+        </svg>
+
+        <div className="relative anim-fade-up">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Chip tone="orange" icon="FlaskConical">Avance 2 · Proyecto final</Chip>
+            <Chip tone="blue" icon="Sigma">Inferencia Bayesiana</Chip>
+          </div>
+          <h1 className="max-w-4xl text-3xl font-extrabold leading-[1.1] tracking-tight text-slate-50 sm:text-5xl lg:text-6xl">
+            Del talud único a la <span className="text-sky-300">región</span>:
+            <br />
+            <span className="text-orange-300">modelo jerárquico</span> de deterioro geotécnico
+          </h1>
+          <p className="mt-5 max-w-2xl text-base text-slate-400 sm:text-lg">
+            AGD-Sentinel V2 · Pérdida de cohesión en taludes coluviales de Toledo, Norte de Santander
+          </p>
+
+          <div className="mt-8 grid max-w-2xl grid-cols-3 gap-3">
+            <Stat value="48" label="observaciones" tone="blue" />
+            <Stat value="27" label="taludes" tone="indigo" />
+            <Stat value="1" label="tasa regional δ" tone="orange" />
+          </div>
+
+          <div className="mt-8 flex flex-col gap-4 border-t border-slate-800 pt-5 text-sm text-slate-400 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="font-medium text-slate-200">Santiago Sepúlveda · Juan José Rangel · Mateo Bazán</div>
+              <div className="mt-0.5 text-xs text-slate-500">Cód. 2243557 · 2243554 · 2243590</div>
+            </div>
+            <div className="sm:text-right">
+              <div>Prof. David Romo Bucheli, PhD</div>
+              <div className="text-xs text-slate-500">28 de octubre de 2026</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ---------- 02 · Problema ---------- */
+    const SlideProblema = () => (
+      <SlideShell n={2} kicker="El problema" title="Los taludes pierden resistencia. ¿A qué ritmo y con cuánta incertidumbre?">
+        <div className="grid gap-5 lg:grid-cols-5">
+          <div className="space-y-4 lg:col-span-2">
+            <Card tone="orange" className="p-5">
+              <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-orange-300">
+                <Icon name="TrendingDown" size={15} /> Deterioro Geotécnico Acumulado
+              </div>
+              <div className="font-mono-sci text-2xl font-bold text-slate-50 sm:text-3xl">
+                c<sub className="text-base">i</sub>(t) = <span className="text-sky-300">α<sub className="text-base">i</sub></span> − <span className="text-orange-300">δ</span>·t
+              </div>
+              <ul className="mt-4 space-y-1.5 text-sm text-slate-400">
+                <li><span className="font-mono-sci text-sky-300">αᵢ</span> · cohesión inicial del talud i</li>
+                <li><span className="font-mono-sci text-orange-300">δ</span> · tasa de pérdida (kPa/año)</li>
+                <li className="text-slate-500">Luego c → FoS vía talud infinito (Skempton y DeLory, 1957)</li>
+              </ul>
+            </Card>
+            <Card className="p-5">
+              <div className="text-sm text-slate-400">Contexto</div>
+              <ul className="mt-2 space-y-2">
+                <Bullet icon="MapPin" tone="blue">Suelos coluviales · región de Toledo</Bullet>
+                <Bullet icon="Database" tone="blue">Ensayos de corte directo y SPT</Bullet>
+                <Bullet icon="Mountain" tone="orange">Sitio estrella: <b className="text-slate-100">Cortinas</b>, con falla observada</Bullet>
+              </ul>
+            </Card>
+          </div>
+
+          <div className="space-y-3 lg:col-span-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Tres objetivos inferenciales</div>
+            {[
+              { n: 'i', icon: 'Target', tone: 'blue', t: 'Estimar', d: 'Tasa de pérdida δ y cohesión inicial αᵢ de cada talud, con su incertidumbre.' },
+              { n: 'ii', icon: 'Activity', tone: 'indigo', t: 'Predecir', d: 'Cohesión y P(FoS < 1) entre 0 y 8 años.' },
+              { n: 'iii', icon: 'ShieldCheck', tone: 'orange', t: 'Contrastar', d: '¿Cortinas sigue la recta decreciente tras la falla… o recupera resistencia (p. ej. succión)?' },
+            ].map((o) => (
+              <Card key={o.n} tone={o.tone} className="flex items-start gap-4 p-4 sm:p-5">
+                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${TONES[o.tone].bg} ${TONES[o.tone].text}`}>
+                  <Icon name={o.icon} size={22} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono-sci text-xs text-slate-500">({o.n})</span>
+                    <span className={`text-lg font-semibold ${TONES[o.tone].text}`}>{o.t}</span>
+                  </div>
+                  <p className="mt-0.5 text-[15px] text-slate-300">{o.d}</p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </SlideShell>
+    );
+
+    /* ---------- 03 · Box's Loop ---------- */
+    const BOX_STEPS = [
+      {
+        id: 'proponer', icon: 'Lightbulb', tone: 'blue', label: 'Proponer', tag: 'Avance 1',
+        head: 'Bayes empírico simple, un solo sitio',
+        items: ['Normal multivariada para (c₀, φ₀), ρ = −0.62', 'Tasas individuales α y δ (Lognormal)', 'Verosimilitud gaussiana con 2 datos en t = 4'],
+      },
+      {
+        id: 'ajustar', icon: 'Cpu', tone: 'indigo', label: 'Ajustar', tag: 'Datos + NUTS',
+        head: 'Ampliar a la región y correr el muestreador',
+        items: ['Base maestra: 48 obs. de 27 sitios', 'Corrida preliminar NUTS (PyMC v5)', '0 divergencias · R̂ = 1.00'],
+      },
+      {
+        id: 'criticar', icon: 'Search', tone: 'orange', label: 'Criticar', tag: '3 preguntas',
+        head: 'Los datos objetan el modelo',
+        items: ['26 de 27 sitios con un solo instante (Small Data)', 'Cohesiones ≈ 0 kPa vs. Normal sin límites', 'La fricción domina el FoS (86 % de la caída)'],
+      },
+      {
+        id: 'replantear', icon: 'Repeat', tone: 'green', label: 'Replantear', tag: 'Avance 2',
+        head: 'Modelo jerárquico regional',
+        items: ['δ regional compartido + αᵢ por sitio (pooling parcial)', 'Normal truncada en 0', 'Fricción en 2 escenarios fijos'],
+      },
+    ];
+
+    const SlideBox = () => {
+      const [active, setActive] = useState(2);
+      const step = BOX_STEPS[active];
+      const t = TONES[step.tone];
+      return (
+        <SlideShell n={3} kicker="Flujo de trabajo bayesiano" title="El ciclo de Box: criticar el modelo es parte del modelo"
+          sub="Toca cada etapa para ver qué hicimos en este proyecto.">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {BOX_STEPS.map((s, i) => {
+              const on = i === active;
+              return (
+                <button key={s.id} onClick={() => setActive(i)}
+                  className={`group relative rounded-2xl border p-4 text-left transition-all cursor-pointer ${
+                    on ? `${TONES[s.tone].border} ${TONES[s.tone].bg} ring-1 ${TONES[s.tone].ring}` : 'border-slate-800 bg-slate-900/50 hover:border-slate-600'
+                  }`}>
+                  <div className="flex items-center justify-between">
+                    <span className={on ? TONES[s.tone].text : 'text-slate-500'}><Icon name={s.icon} size={22} /></span>
+                    <span className="font-mono-sci text-[11px] text-slate-500">{i + 1}/4</span>
+                  </div>
+                  <div className={`mt-3 text-lg font-semibold ${on ? TONES[s.tone].text : 'text-slate-300'}`}>{s.label}</div>
+                  <div className="text-xs text-slate-500">{s.tag}</div>
+                  {i < 3 && <span className="absolute -right-3.5 top-1/2 z-10 hidden -translate-y-1/2 text-slate-600 sm:block"><Icon name="ArrowRight" size={18} /></span>}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 hidden items-center gap-2 pl-2 text-xs text-slate-500 sm:flex">
+            <Icon name="CornerDownLeft" size={14} /> el ciclo vuelve a empezar con el modelo replanteado
+          </div>
+
+          <Card key={step.id} tone={step.tone} className="anim-fade-up mt-4 p-5 sm:p-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${t.bg} ${t.text}`}><Icon name={step.icon} size={20} /></span>
+              <div>
+                <div className={`text-xs font-semibold uppercase tracking-widest ${t.text}`}>{step.label}</div>
+                <div className="text-lg font-semibold text-slate-50 sm:text-xl">{step.head}</div>
+              </div>
+            </div>
+            <ul className="mt-4 grid gap-2.5 sm:grid-cols-3">
+              {step.items.map((it) => (
+                <li key={it} className={`rounded-xl border ${t.border} bg-slate-950/50 p-3 text-sm text-slate-300`}>{it}</li>
+              ))}
+            </ul>
+          </Card>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Chip tone="gray" icon="Clock">Siguiente vuelta: prior predictive checks · sensibilidad a priors · comparación de modelos</Chip>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 04 · Datos ---------- */
+    const SlideDatos = () => {
+      const rows = [
+        { label: 'Fuentes unidas', total: 57, train: 0, val: 0, note: '4 + 38 + 15', tone: 'gray' },
+        { label: 'Tras depurar', total: 50, train: 0, val: 0, note: '−7 sin c, φ o fecha', tone: 'indigo' },
+        { label: 'Base final', total: 50, train: 48, val: 2, note: '48 + 2', tone: 'blue' },
+      ];
+      return (
+        <SlideShell n={4} kicker="Construcción de la base" title="De 57 filas crudas a 48 + 2 observaciones limpias"
+          sub="Todo dato retrocalculado a FoS = 1 o proveniente de superficies circulares fue excluido: no son mediciones, son resultados de diseño.">
+          <div className="grid gap-5 lg:grid-cols-5">
+            <Card className="p-5 lg:col-span-3">
+              <div className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-500">Embudo de depuración</div>
+              <div className="space-y-5">
+                {rows.map((r, i) => (
+                  <div key={r.label}>
+                    <div className="mb-1.5 flex items-baseline justify-between text-sm">
+                      <span className="font-medium text-slate-200">{r.label}</span>
+                      <span className="font-mono-sci text-xs text-slate-500">{r.note}</span>
+                    </div>
+                    <div className="flex h-9 w-full overflow-hidden rounded-lg bg-slate-800/60">
+                      <div className="anim-grow flex h-full items-center justify-end pr-2 text-sm font-bold text-slate-950"
+                        style={{ width: `${((r.train || r.total) / 57) * 100}%`, background: r.train ? TONES.blue.hex : TONES[r.tone].hex, animationDelay: `${i * 0.15}s` }}>
+                        {r.train || r.total}
+                      </div>
+                      {r.val > 0 && (
+                        <div className="anim-grow flex h-full items-center justify-center text-xs font-bold text-slate-950"
+                          style={{ width: `${(r.val / 57) * 100}%`, background: '#fb7185', animationDelay: '0.5s' }}>
+                          {r.val}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-400">
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-sky-400" /> Entrenamiento (27 sitios)</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-rose-400" /> Validación: Cortinas t = 5.84 y 7.84</span>
+              </div>
+            </Card>
+
+            <div className="space-y-3 lg:col-span-2">
+              <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Decisiones de curaduría</div>
+              {[
+                { icon: 'Layers', tone: 'blue', t: '30 → 27 sitios', d: 'Estratos de Río Negro agrupados por sondeo (R-01…R-03).' },
+                { icon: 'Filter', tone: 'orange', t: '3 ceros → ε = 0.1 kPa', d: 'Evita ln 0; efecto práctico nulo.' },
+                { icon: 'Calendar', tone: 'indigo', t: 't = 0 el 1-mar-2017', d: 'Referencia común de todos los sitios.' },
+                { icon: 'Scale', tone: 'gray', t: 'γ = 19.01 kN/m³', d: 'Promedio regional (16 celdas vacías), no medición de Cortinas.' },
+              ].map((c) => (
+                <Card key={c.t} tone={c.tone} className="flex items-start gap-3 p-3.5">
+                  <span className={`mt-0.5 ${TONES[c.tone].text}`}><Icon name={c.icon} size={20} /></span>
+                  <div>
+                    <div className={`text-sm font-semibold ${TONES[c.tone].text}`}>{c.t}</div>
+                    <div className="text-sm text-slate-400">{c.d}</div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 05 · Small Data (Pregunta 1) ---------- */
+    const SlideSmallData = () => {
+      const [view, setView] = useState('sitios');
+      const dataSitios = [
+        { k: '1 registro', v: 17, tone: 'orange' },
+        { k: '2 registros', v: 8, tone: 'indigo' },
+        { k: '4 registros', v: 1, tone: 'blue' },
+        { k: '11 registros', v: 1, tone: 'blue' },
+      ];
+      const dataT = [
+        { k: 't = 0 (referencia)', v: 27, tone: 'orange' },
+        { k: 't > 0', v: 21, tone: 'blue' },
+      ];
+      const data = view === 'sitios' ? dataSitios : dataT;
+      const max = view === 'sitios' ? 17 : 27;
+      const unit = view === 'sitios' ? 'sitios' : 'observaciones';
+      return (
+        <SlideShell n={5} kicker="Pregunta 1 · ¿Hay información longitudinal?" title="Small Data: 26 de 27 taludes tienen un solo instante en el tiempo"
+          sub="Contar tiempos, no solo observaciones, es lo que revela el problema de identificabilidad.">
+          <div className="grid gap-5 lg:grid-cols-5">
+            <Card className="p-5 lg:col-span-3">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <SegTabs value={view} onChange={setView}
+                  options={[{ id: 'sitios', label: 'Registros por sitio', icon: 'BarChart3' }, { id: 'tiempo', label: 'Observaciones por instante', icon: 'Clock' }]} />
+                <span className="font-mono-sci text-xs text-slate-500">n = {unit}</span>
+              </div>
+              <div className="space-y-3.5" key={view}>
+                {data.map((d, i) => (
+                  <div key={d.k} className="flex items-center gap-3">
+                    <div className="w-32 shrink-0 text-sm text-slate-300 sm:w-40">{d.k}</div>
+                    <div className="h-8 flex-1 overflow-hidden rounded-md bg-slate-800/60">
+                      <div className="anim-grow flex h-full items-center justify-end pr-2 text-sm font-bold text-slate-950"
+                        style={{ width: `${Math.max((d.v / max) * 100, 7)}%`, background: TONES[d.tone].hex, animationDelay: `${i * 0.1}s` }}>
+                        {d.v}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-sm text-slate-500">
+                {view === 'sitios'
+                  ? '17 de 27 sitios (63 %) tienen un único registro; PR-21-01-38 llega a 11.'
+                  : 'Solo Cortinas tiene ensayos en dos instantes (t = 0 y t = 3.84 años).'}
+              </p>
+            </Card>
+
+            <div className="space-y-3 lg:col-span-2">
+              <Card tone="orange" className="p-5">
+                <div className="flex items-center gap-2 text-orange-300"><Icon name="AlertTriangle" size={18} /><span className="text-sm font-semibold">Identificabilidad</span></div>
+                <Eq tone="orange" className="mt-3">una medición ⇒ solo αᵢ − δᵢ·t<br />¿cuánto es αᵢ y cuánto δᵢ?  <span className="text-rose-300">✗</span></Eq>
+              </Card>
+              <Card tone="blue" className="p-5">
+                <div className="text-sm text-slate-400">Única caída observada · Cortinas</div>
+                <div className="mt-2 flex items-baseline gap-2 font-mono-sci">
+                  <span className="text-2xl font-bold text-sky-300">18.5</span>
+                  <Icon name="ArrowRight" size={16} className="text-slate-500" />
+                  <span className="text-2xl font-bold text-orange-300">12.1</span>
+                  <span className="text-xs text-slate-500">kPa</span>
+                </div>
+                <div className="mt-1 text-sm text-slate-400">≈ <b className="text-slate-100">1.67 kPa/año</b> · 2 puntos, sin medida del error</div>
+              </Card>
+              <Card tone="green" className="p-4">
+                <div className="flex items-start gap-2 text-sm text-slate-300">
+                  <span className="mt-0.5 text-emerald-300"><Icon name="CheckCircle2" size={18} /></span>
+                  <span><b className="text-emerald-300">Salida:</b> compartir la pendiente entre sitios (pooling parcial).</span>
+                </div>
+              </Card>
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 06 · Salto metodológico (Toggle) ---------- */
+    // Posiciones de los 27 nodos (2 anillos). Cortinas = índice 0.
+    const NODES = (() => {
+      const out = [];
+      const outer = 18, inner = 9;
+      for (let i = 0; i < outer; i++) {
+        const a = (i / outer) * 2 * Math.PI - Math.PI / 2;
+        out.push({ x: 50 + 42 * Math.cos(a), y: 50 + 42 * Math.sin(a) });
+      }
+      for (let i = 0; i < inner; i++) {
+        const a = (i / inner) * 2 * Math.PI - Math.PI / 2 + 0.3;
+        out.push({ x: 50 + 24 * Math.cos(a), y: 50 + 24 * Math.sin(a) });
+      }
+      // Cortinas pasa a ser el nodo superior del anillo exterior.
+      return out;
+    })();
+
+    const SlideSalto = () => {
+      const [regional, setRegional] = useState(false);
+      const compare = regional
+        ? [
+            ['Sitios', '27', 'blue'], ['Observaciones', '48 (+2 validación)', 'blue'], ['Tasa de pérdida', '1 compartida: δ_región', 'orange'],
+            ['Cohesión inicial', '27 valores αᵢ (jerárquicos)', 'blue'], ['Verosimilitud', 'Normal truncada en 0', 'green'],
+          ]
+        : [
+            ['Sitios', '1 (Cortinas)', 'gray'], ['Observaciones', '4 aisladas', 'gray'], ['Tasa de pérdida', '2 individuales: α (c) y δ (φ)', 'gray'],
+            ['Cohesión inicial', 'c₀ ~ Normal multivariada con φ₀', 'gray'], ['Verosimilitud', 'Gaussiana, 2 datos en t = 4', 'gray'],
+          ];
+      return (
+        <SlideShell n={6} kicker="El salto metodológico" title="Del Avance 1 al Avance 2: cómo se superó el Small Data"
+          sub="Activa el interruptor para pasar de un modelo de sitio único al modelo jerárquico regional.">
+          {/* Toggle */}
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <button onClick={() => setRegional(false)} className={`text-sm font-medium transition-colors cursor-pointer ${!regional ? 'text-slate-100' : 'text-slate-500'}`}>
+              Modelo Bayesiano Simple <span className="text-slate-500">(1 sitio)</span>
+            </button>
+            <button role="switch" aria-checked={regional} aria-label="Cambiar entre modelo simple y jerárquico" onClick={() => setRegional((v) => !v)}
+              className={`relative h-8 w-16 shrink-0 rounded-full border transition-colors cursor-pointer ${regional ? 'border-orange-300/50 bg-orange-300/20' : 'border-sky-400/40 bg-sky-400/15'}`}>
+              <span className={`absolute top-1 h-6 w-6 rounded-full transition-all duration-300 ${regional ? 'left-9 bg-orange-300' : 'left-1 bg-sky-400'}`} />
+            </button>
+            <button onClick={() => setRegional(true)} className={`text-sm font-medium transition-colors cursor-pointer ${regional ? 'text-slate-100' : 'text-slate-500'}`}>
+              Modelo Jerárquico Regional <span className="text-slate-500">(27 sitios)</span>
+            </button>
+          </div>
+
+          <div className="grid items-center gap-5 lg:grid-cols-2">
+            {/* Visual */}
+            <Card tone={regional ? 'orange' : 'blue'} className="relative mx-auto aspect-square overflow-hidden p-2" style={{ width: 'min(100%, 28rem, 52vh)' }}>
+              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" aria-hidden="true">
+                {NODES.map((n, i) => (
+                  <line key={i} x1="50" y1="50" x2={n.x} y2={n.y} stroke={i === 0 ? '#fdba74' : '#38bdf8'} strokeWidth="0.35"
+                    style={{ opacity: regional ? 0.35 : 0, transition: 'opacity .6s ease', transitionDelay: regional ? `${i * 15}ms` : '0ms' }} />
+                ))}
+              </svg>
+
+              {/* Hub regional */}
+              <div className="absolute flex items-center justify-center rounded-full border border-orange-300/60 bg-orange-300/15 text-center font-mono-sci text-orange-200 transition-all duration-500"
+                style={{ left: '50%', top: '50%', width: '17%', height: '17%', transform: `translate(-50%,-50%) scale(${regional ? 1 : 0})`, opacity: regional ? 1 : 0, fontSize: 'clamp(9px,1.6vw,13px)' }}>
+                δ<sub>reg</sub>
+              </div>
+
+              {NODES.map((n, i) => {
+                const isC = i === 0;
+                const left = regional ? n.x : 50;
+                const top = regional ? n.y : 50;
+                const visible = regional || isC;
+                const size = !regional && isC ? 26 : 5.5;
+                return (
+                  <div key={i}
+                    className={`absolute rounded-full border ${isC ? 'border-orange-200 bg-orange-300' : 'border-sky-300/70 bg-sky-400/70'}`}
+                    style={{
+                      left: `${left}%`, top: `${top}%`, width: `${size}%`, height: `${size}%`,
+                      transform: 'translate(-50%,-50%)', opacity: visible ? 1 : 0,
+                      transition: 'all .7s cubic-bezier(.22,.8,.3,1)', transitionDelay: regional ? `${i * 15}ms` : '0ms',
+                      zIndex: isC ? 5 : 1,
+                    }}>
+                    {!regional && isC && (
+                      <span className="absolute inset-0 flex items-center justify-center text-center font-semibold text-slate-950" style={{ fontSize: 'clamp(9px,1.7vw,13px)' }}>Cortinas</span>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-300" /> Cortinas</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" /> otros taludes</span>
+              </div>
+            </Card>
+
+            {/* Comparativa */}
+            <div>
+              <div className={`mb-3 flex items-center gap-2 text-sm font-semibold ${regional ? 'text-emerald-300' : 'text-rose-300'}`}>
+                <Icon name={regional ? 'CheckCircle2' : 'AlertTriangle'} size={18} />
+                {regional ? 'Pooling parcial: la tasa se informa con toda la región' : 'Small Data: sin series, sin tasas propias por sitio'}
+              </div>
+              <div className="space-y-2" key={String(regional)}>
+                {compare.map(([k, v, tone], i) => (
+                  <div key={k} className="anim-fade-up flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2.5" style={{ animationDelay: `${i * 60}ms` }}>
+                    <span className="text-sm text-slate-400">{k}</span>
+                    <span className={`text-right text-sm font-semibold ${TONES[tone].text}`}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-sm text-slate-500">
+                {regional
+                  ? 'Un talud con una medición se “jala” hacia la media regional; uno con más datos se aleja de ella.'
+                  : 'Notación: c₀ → αᵢ y α → δ_región; φ deja de degradarse dentro del modelo.'}
+              </p>
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 07 · Normal truncada (Pregunta 2) ---------- */
+    const SlideTruncada = () => {
+      const [truncada, setTruncada] = useState(false);
+      const M = 14.6, S = 7.8;
+      const pNeg = normCdf((0 - M) / S);        // ≈ 0.031
+      const W = 600, H = 250, pad = { l: 30, r: 14, t: 12, b: 32 };
+      const xMin = -12, xMax = 40, yMax = 0.058;
+      const X = (v) => pad.l + ((v - xMin) / (xMax - xMin)) * (W - pad.l - pad.r);
+      const Y = (v) => pad.t + (1 - v / yMax) * (H - pad.t - pad.b);
+      const pdf = (x) => Math.exp(-0.5 * ((x - M) / S) ** 2) / (S * Math.sqrt(2 * Math.PI));
+      const xs = useMemo(() => Array.from({ length: 261 }, (_, i) => xMin + (i / 260) * (xMax - xMin)), []);
+      const curve = (arr, scale = 1) => arr.map((x) => `${X(x).toFixed(1)},${Y(pdf(x) * scale).toFixed(1)}`).join(' ');
+      const negXs = xs.filter((x) => x <= 0);
+      const posXs = xs.filter((x) => x >= 0);
+      const negArea = `${X(xMin)},${Y(0)} ${curve(negXs)} ${X(0)},${Y(0)}`;
+      const scale = 1 / (1 - pNeg);
+      const fillPos = `${X(0)},${Y(0)} ${curve(posXs, truncada ? scale : 1)} ${X(xMax)},${Y(0)}`;
+      const dots = [0.1, 0.1, 0.1, 0.72];
+
+      return (
+        <SlideShell n={7} kicker="Pregunta 2 · ¿Cohesión ≈ 0 rompe la Normal?" title="La Normal admite cohesión negativa. La física no."
+          sub="Alterna la verosimilitud y observa dónde va a parar la masa de probabilidad.">
+          <div className="grid gap-5 lg:grid-cols-5">
+            <Card className="p-4 sm:p-5 lg:col-span-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <SegTabs tone={truncada ? 'orange' : 'blue'} value={truncada ? 'T' : 'N'} onChange={(v) => setTruncada(v === 'T')}
+                  options={[{ id: 'N', label: 'Normal (Avance 1)', icon: 'Activity' }, { id: 'T', label: 'Normal truncada en 0', icon: 'Scissors' }]} />
+                <span className="font-mono-sci text-xs text-slate-500">μ = 14.6 · σ = 7.8 kPa</span>
+              </div>
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Densidad normal ajustada a la cohesión con la zona negativa sombreada">
+                {/* ejes */}
+                <line x1={pad.l} y1={Y(0)} x2={W - pad.r} y2={Y(0)} stroke="#334155" />
+                {[-10, 0, 10, 20, 30, 40].map((v) => (
+                  <g key={v}>
+                    <line x1={X(v)} y1={Y(0)} x2={X(v)} y2={Y(0) + 5} stroke="#475569" />
+                    <text x={X(v)} y={Y(0) + 20} textAnchor="middle" fontSize="12" fill="#64748b">{v}</text>
+                  </g>
+                ))}
+                <text x={W - pad.r} y={H - 2} textAnchor="end" fontSize="12" fill="#64748b">cohesión c (kPa)</text>
+                {/* zona prohibida */}
+                <rect x={X(xMin)} y={pad.t} width={X(0) - X(xMin)} height={Y(0) - pad.t} fill="#fb7185" fillOpacity="0.06" />
+                <line x1={X(0)} y1={pad.t} x2={X(0)} y2={Y(0)} stroke="#fb7185" strokeDasharray="4 4" strokeOpacity="0.8" />
+                <text x={X(0) - 8} y={pad.t + 14} textAnchor="end" fontSize="12" fill="#fb7185">c &lt; 0 imposible</text>
+                {/* masa negativa */}
+                <polygon points={negArea} fill="#fb7185" fillOpacity={truncada ? 0 : 0.55} style={{ transition: 'fill-opacity .5s' }} />
+                {/* densidad positiva */}
+                <polygon points={fillPos} fill={truncada ? '#fdba74' : '#38bdf8'} fillOpacity="0.22" style={{ transition: 'fill .5s' }} />
+                <polyline points={curve(posXs, truncada ? scale : 1)} fill="none" stroke={truncada ? '#fdba74' : '#38bdf8'} strokeWidth="2.5" />
+                <polyline points={curve(negXs)} fill="none" stroke="#38bdf8" strokeWidth="2" strokeOpacity={truncada ? 0 : 1} strokeDasharray={truncada ? '0' : '0'} style={{ transition: 'stroke-opacity .5s' }} />
+                {/* observaciones < 1 kPa */}
+                {dots.map((d, i) => (
+                  <circle key={i} cx={X(d)} cy={Y(0) - 7 - i * 9} r="4.5" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.5" />
+                ))}
+                <text x={X(1.8)} y={Y(0) - 12} fontSize="11" fill="#cbd5e1" textAnchor="start">← 4 obs. &lt; 1 kPa</text>
+                {/* etiqueta masa */}
+                <g style={{ opacity: truncada ? 0 : 1, transition: 'opacity .4s' }}>
+                  <text x={X(-6)} y={Y(0) - 40} textAnchor="middle" fontSize="15" fontWeight="700" fill="#fb7185">{(pNeg * 100).toFixed(1)} %</text>
+                  <text x={X(-6)} y={Y(0) - 24} textAnchor="middle" fontSize="11" fill="#fb7185">masa negativa</text>
+                </g>
+                <g style={{ opacity: truncada ? 1 : 0, transition: 'opacity .4s' }}>
+                  <text x={X(-6)} y={Y(0) - 32} textAnchor="middle" fontSize="13" fontWeight="600" fill="#6ee7b7">0 % negativa</text>
+                  <text x={X(-6)} y={Y(0) - 18} textAnchor="middle" fontSize="11" fill="#6ee7b7">renormalizada</text>
+                </g>
+              </svg>
+            </Card>
+
+            <div className="space-y-3 lg:col-span-2">
+              <div className="grid grid-cols-2 gap-3">
+                <Stat value="8.3 %" label="obs. < 1 kPa" sub="4 de 48 · todas Río Negro" tone="orange" />
+                <Stat value="3.1 %" label="masa < 0 (global)" sub="~1.5 obs. de 48" tone="red" />
+              </div>
+              <Card className="p-4">
+                <ul className="space-y-2.5">
+                  <Bullet icon="Minus" tone="red">En R-02, una Normal pondría ≈ <b className="text-slate-100">50 %</b> de su masa bajo cero.</Bullet>
+                  <Bullet icon="TrendingDown" tone="orange">Con la tasa de Cortinas, la recta toca c = 0 hacia los <b className="text-slate-100">~11 años</b>.</Bullet>
+                  <Bullet icon="HelpCircle" tone="blue">Esos ceros provienen de interceptos de regresión SPT: ¿reales?</Bullet>
+                </ul>
+              </Card>
+              <Card tone="green" className="p-4">
+                <div className="text-xs font-semibold uppercase tracking-widest text-emerald-300">Decisión</div>
+                <Eq tone="green" className="mt-2">c_obs ~ TruncatedNormal(μ, σ_obs, lower = 0)</Eq>
+              </Card>
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+    /* ---------- 08 · Sensibilidad del FoS (Pregunta 3) ---------- */
+    const SlideFoS = () => {
+      const [p, setP] = useState(100);              // 0..100 % del camino entre t = 0 y t = 3.84
+      const [mode, setMode] = useState('ambos');    // ambos | cohesion | friccion
+      const f = p / 100;
+      const c = mode === 'friccion' ? C_PICO : C_PICO + (C_RESIDUAL - C_PICO) * f;
+      const phi = mode === 'cohesion' ? PHI_PICO : PHI_PICO + (PHI_RESIDUAL - PHI_PICO) * f;
+      const tc = termCohesion(c);
+      const tf = termFriccion(phi);
+      const fos = tc + tf;
+      const SCALE = 1.4;
+      const failed = fos < 1;
+
+      // Atribución exacta a partir de la ecuación del talud infinito.
+      const dC = termCohesion(C_PICO) - termCohesion(C_RESIDUAL);
+      const dF = termFriccion(PHI_PICO) - termFriccion(PHI_RESIDUAL);
+      const dTot = dC + dF;
+      const shareF = Math.round((dF / dTot) * 100);
+      const shareC = 100 - shareF;
+
+      const finals = [
+        { id: 'ambos', label: 'Ambos se degradan', val: termCohesion(C_RESIDUAL) + termFriccion(PHI_RESIDUAL), tone: 'orange' },
+        { id: 'cohesion', label: 'Solo cohesión cae', val: termCohesion(C_RESIDUAL) + termFriccion(PHI_PICO), tone: 'blue' },
+        { id: 'friccion', label: 'Solo fricción cae', val: termCohesion(C_PICO) + termFriccion(PHI_RESIDUAL), tone: 'red' },
+      ];
+
+      return (
+        <SlideShell n={8} kicker="Pregunta 3 · ¿Quién domina el FoS?" title="La fricción explica el 86 % de la caída del FoS en Cortinas">
+          <div className="grid gap-5 lg:grid-cols-5">
+            {/* Simulador */}
+            <Card className="p-4 sm:p-5 lg:col-span-3">
+              <div className="mb-1 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Simulador · talud infinito</div>
+                <Chip tone={failed ? 'red' : 'green'} icon={failed ? 'AlertTriangle' : 'ShieldCheck'}>{failed ? 'FoS < 1 · inestable' : 'FoS ≥ 1 · estable'}</Chip>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2.5 text-sm">
+                <div className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-3">
+                  <div className="text-xs text-slate-400">Cohesión c</div>
+                  <div className="font-mono-sci text-xl font-bold text-sky-300">{fmt(c, 1)} <span className="text-xs font-normal text-slate-500">kPa</span></div>
+                </div>
+                <div className="rounded-xl border border-orange-300/30 bg-orange-300/10 p-3">
+                  <div className="text-xs text-slate-400">Fricción φ</div>
+                  <div className="font-mono-sci text-xl font-bold text-orange-300">{fmt(phi, 1)}<span className="text-xs font-normal text-slate-500"> °</span></div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <div className="mb-2 flex justify-between text-xs text-slate-500">
+                  <span>2017 · t = 0 (pico)</span><span className="font-mono-sci text-slate-300">{fmt(f * 3.84, 2)} años</span><span>2021 · t = 3.84 (falla)</span>
+                </div>
+                <input type="range" min="0" max="100" value={p} onChange={(e) => setP(Number(e.target.value))} className="sci-range" aria-label="Progreso del deterioro entre t = 0 y t = 3.84" />
+              </div>
+
+              {/* Barra proporcional FoS */}
+              <div className="mt-4">
+                <div className="relative h-12 w-full overflow-hidden rounded-xl bg-slate-800/60">
+                  <div className="absolute inset-y-0 left-0 flex items-center justify-center text-xs font-bold text-slate-950 transition-all duration-200"
+                    style={{ width: `${(tf / SCALE) * 100}%`, background: TONES.orange.hex }}>
+                    {tf / SCALE > 0.18 ? `φ · ${fmt(tf)}` : ''}
+                  </div>
+                  <div className="absolute inset-y-0 flex items-center justify-center text-xs font-bold text-slate-950 transition-all duration-200"
+                    style={{ left: `${(tf / SCALE) * 100}%`, width: `${(tc / SCALE) * 100}%`, background: TONES.blue.hex }}>
+                    {tc / SCALE > 0.07 ? `c · ${fmt(tc)}` : ''}
+                  </div>
+                  <div className="absolute inset-y-0 w-0.5 bg-rose-400" style={{ left: `${(1 / SCALE) * 100}%` }} />
+                </div>
+                <div className="relative mt-1 h-5 text-[11px]">
+                  <span className="absolute -translate-x-1/2 text-rose-300" style={{ left: `${(1 / SCALE) * 100}%` }}>FoS = 1</span>
+                  <span className="absolute left-0 text-slate-600">0</span>
+                  <span className="absolute right-0 text-slate-600">{SCALE}</span>
+                </div>
+                <div className="mt-2 flex items-end justify-between">
+                  <div className="flex gap-4 text-xs text-slate-400">
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-orange-300" /> término de fricción</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-sky-400" /> término de cohesión</span>
+                  </div>
+                  <div className={`font-mono-sci text-3xl font-bold ${failed ? 'text-rose-300' : 'text-emerald-300'}`}>FoS = {fmt(fos)}</div>
+                </div>
+              </div>
+
+              {/* Contrafactuales */}
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {finals.map((o) => {
+                  const on = mode === o.id;
+                  return (
+                    <button key={o.id} onClick={() => { setMode(o.id); setP(100); }}
+                      className={`rounded-xl border p-2.5 text-left transition-all cursor-pointer ${on ? `${TONES[o.tone].border} ${TONES[o.tone].bg} ring-1 ${TONES[o.tone].ring}` : 'border-slate-800 bg-slate-950/40 hover:border-slate-600'}`}>
+                      <div className="text-[11px] leading-tight text-slate-400">{o.label}</div>
+                      <div className={`font-mono-sci mt-1 text-lg font-bold ${o.val < 1 ? 'text-rose-300' : 'text-emerald-300'}`}>{fmt(o.val)}</div>
+                      <div className="text-[10px] text-slate-600">FoS en t = 3.84</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {/* Atribución + escenarios */}
+            <div className="space-y-3 lg:col-span-2">
+              <Card tone="orange" className="p-4 sm:p-5">
+                <div className="text-sm text-slate-400">Caída del FoS 2017 → 2021</div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="font-mono-sci text-2xl font-bold text-slate-50">{fmt(termCohesion(C_PICO) + termFriccion(PHI_PICO))}</span>
+                  <Icon name="ArrowRight" size={16} className="text-slate-500" />
+                  <span className="font-mono-sci text-2xl font-bold text-rose-300">{fmt(termCohesion(C_RESIDUAL) + termFriccion(PHI_RESIDUAL))}</span>
+                  <span className="font-mono-sci text-sm text-slate-500">(Δ {fmt(dTot)})</span>
+                </div>
+                <div className="mt-4 flex h-10 w-full overflow-hidden rounded-lg">
+                  <div className="anim-grow flex items-center justify-center text-sm font-bold text-slate-950" style={{ width: `${shareF}%`, background: TONES.orange.hex }}>{shareF} %</div>
+                  <div className="anim-grow flex items-center justify-center text-xs font-bold text-slate-950" style={{ width: `${shareC}%`, background: TONES.blue.hex, animationDelay: '.2s' }}>{shareC} %</div>
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-slate-400">
+                  <span>Fricción 30.8° → 21.3° <b className="text-orange-300">({fmt(dF)})</b></span>
+                  <span>Cohesión <b className="text-sky-300">({fmt(dC)})</b></span>
+                </div>
+              </Card>
+
+              <Card className="p-4 sm:p-5">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">Dos escenarios fijos de φ</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-orange-300/30 bg-orange-300/10 p-3">
+                    <div className="text-xs text-slate-400">Pico</div>
+                    <div className="font-mono-sci text-2xl font-bold text-orange-300">30.8°</div>
+                    <div className="text-[11px] text-slate-500">antes de la falla</div>
+                  </div>
+                  <div className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-3">
+                    <div className="text-xs text-slate-400">Residual</div>
+                    <div className="font-mono-sci text-2xl font-bold text-sky-300">21.3°</div>
+                    <div className="text-[11px] text-slate-500">después de la falla</div>
+                  </div>
+                </div>
+                <ul className="mt-3 space-y-2">
+                  <Bullet icon="Check" tone="green">Solo c es aleatoria: φ entra como rango fijo, sin ajustar una trayectoria que los datos no identifican.</Bullet>
+                  <Bullet icon="Check" tone="green">+10 % en φ ⇒ <b className="text-slate-100">+10.5 %</b> FoS; +10 % en c ⇒ solo <b className="text-slate-100">+1.3 %</b>.</Bullet>
+                </ul>
+              </Card>
+              <p className="px-1 text-[11px] leading-snug text-slate-600">Deslizador: interpolación lineal entre las dos mediciones reales. β = 30°, z = 13 m, γ = 19.01 kN/m³; el nivel absoluto del FoS no está calibrado: úsese para tendencias.</p>
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 09 · Arquitectura (Step Reveal) ---------- */
+    const FLOORS = [
+      {
+        id: 1, tone: 'blue', icon: 'Dna', name: 'Piso 1 · ADN regional', short: 'Tasas compartidas · Lognormal',
+        eq: ['μ_α      ~ Normal(15, 10)', 'σ_α      ~ HalfNormal(5)', 'δ_región ~ LogNormal(ln 1, 0.75)'],
+        points: [
+          'Define la región antes de mirar ningún talud.',
+          'δ_región > 0: el talud pierde cohesión, no la gana.',
+          'Mediana a priori 1 kPa/año; 94 % en [0.24, 4.1].',
+          'Priors débiles que no usan Cortinas: sin doble conteo.',
+        ],
+        code: null,
+      },
+      {
+        id: 2, tone: 'indigo', icon: 'MapPin', name: 'Piso 2 · Efecto local', short: 'No centrada · Sitio_idx',
+        eq: ['z_i ~ Normal(0, 1)', 'α_i = μ_α + σ_α · z_i      i = 0…26'],
+        points: [
+          'Cada talud tiene su cohesión inicial αᵢ, atada a la media regional.',
+          'No centrada: desacopla la escala σ_α y evita divergencias (muchos sitios con 1–2 datos).',
+          'Sitio_idx (0…26) asigna a cada fila su αᵢ.',
+        ],
+        code: 'mu_c = alpha_sitio[Sitio_idx] - delta_region * t',
+      },
+      {
+        id: 3, tone: 'orange', icon: 'Atom', name: 'Piso 3 · Verosimilitud física', short: 'Normal truncada en 0',
+        eq: ['μ_c,i(t) = α_i − δ_región · t', 'σ_obs ~ HalfNormal(5)', 'c_obs ~ TruncatedNormal(μ_c,i(t), σ_obs, lower = 0)'],
+        points: [
+          'Recta de deterioro: pendiente común, intercepto propio.',
+          'La cohesión nunca puede ser negativa.',
+          'Solo c es aleatoria; el FoS se evalúa con φ fija (pico / residual).',
+        ],
+        code: null,
+      },
+    ];
+
+    const SlideArquitectura = () => {
+      const [level, setLevel] = useState(1);
+      const f = FLOORS[level - 1];
+      const t = TONES[f.tone];
+      return (
+        <SlideShell n={9} kicker="Arquitectura del modelo" title="Tres pisos: de la región al dato"
+          sub="Revela cada nivel de la jerarquía, de la cimentación hacia arriba.">
+          <div className="grid gap-5 lg:grid-cols-5">
+            {/* Edificio */}
+            <div className="lg:col-span-2">
+              <div className="flex flex-col gap-2.5">
+                {[...FLOORS].reverse().map((fl) => {
+                  const revealed = fl.id <= level;
+                  const current = fl.id === level;
+                  const tn = TONES[fl.tone];
+                  return (
+                    <button key={fl.id} onClick={() => setLevel(fl.id)} aria-label={fl.name}
+                      className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition-all duration-500 cursor-pointer ${
+                        revealed ? `${tn.border} ${tn.bg}` : 'border-dashed border-slate-800 bg-slate-950/40 opacity-60'
+                      } ${current ? `ring-2 ${tn.ring}` : ''}`}
+                      style={{ marginLeft: `${(3 - fl.id) * 0}px` }}>
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${revealed ? `${tn.bg} ${tn.text}` : 'bg-slate-800/50 text-slate-600'}`}>
+                        <Icon name={revealed ? fl.icon : 'Lock'} size={20} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block text-sm font-semibold ${revealed ? tn.text : 'text-slate-600'}`}>{revealed ? fl.name : `Piso ${fl.id} · ???`}</span>
+                        <span className="block truncate text-xs text-slate-500">{revealed ? fl.short : 'Aún oculto'}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+                <div className="flex items-center gap-2 rounded-xl border border-dashed border-slate-800 px-4 py-2 text-xs text-slate-500">
+                  <Icon name="Database" size={14} /> 48 observaciones c_obs · 27 sitios
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <button onClick={() => setLevel((l) => Math.max(1, l - 1))} disabled={level === 1}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+                  <Icon name="ChevronUp" size={14} /> Ocultar
+                </button>
+                <button onClick={() => setLevel((l) => Math.min(3, l + 1))} disabled={level === 3}
+                  className="flex items-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 text-sm text-sky-200 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+                  <Icon name="Eye" size={14} /> Revelar siguiente
+                </button>
+                <button onClick={() => setLevel(1)} aria-label="Reiniciar" className="ml-auto text-slate-500 hover:text-slate-300 cursor-pointer"><Icon name="RotateCcw" size={16} /></button>
+              </div>
+            </div>
+
+            {/* Detalle */}
+            <Card key={f.id} tone={f.tone} className="anim-fade-up p-5 sm:p-6 lg:col-span-3">
+              <div className="flex items-center gap-3">
+                <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${t.bg} ${t.text}`}><Icon name={f.icon} size={22} /></span>
+                <div>
+                  <div className={`text-xs font-semibold uppercase tracking-widest ${t.text}`}>{f.short}</div>
+                  <div className="text-xl font-bold text-slate-50">{f.name}</div>
+                </div>
+              </div>
+              <Eq tone={f.tone} className="mt-4 whitespace-pre">{f.eq.join('\n')}</Eq>
+              <ul className="mt-4 space-y-2.5">
+                {f.points.map((pt) => <Bullet key={pt} icon="Check" tone={f.tone}>{pt}</Bullet>)}
+              </ul>
+              {f.code && (
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3">
+                  <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500"><Icon name="Terminal" size={12} /> PyMC</div>
+                  <code className="font-mono-sci text-[13px] text-emerald-300">{f.code}</code>
+                </div>
+              )}
+              {f.id === 3 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Chip tone="green" icon="CheckCircle2">Modelo completo</Chip>
+                  <Chip tone="gray">NUTS · PyMC v5</Chip>
+                </div>
+              )}
+            </Card>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 10 · Inferencia y plan ---------- */
+    const SlideInferencia = () => (
+      <SlideShell n={10} kicker="Plan de inferencia" title="Corrida preliminar limpia; la crítica del modelo apenas empieza"
+        sub="Diagnóstico exploratorio con NUTS: todavía no se reportan posteriores formales.">
+        <div className="grid gap-5 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Stat value="4×3000" label="cadenas × muestras" sub="2 000 de calentamiento" tone="blue" />
+              <Stat value="1.00" label="R̂ en todos los parámetros" tone="green" />
+              <Stat value="> 2800" label="ESS mínimo" tone="indigo" />
+              <Stat value="0" label="divergencias" sub="gracias a la no centrada" tone="orange" />
+            </div>
+            <Card className="mt-3 p-4 text-sm text-slate-400">
+              <div className="flex items-center gap-2 text-slate-200"><Icon name="Cpu" size={16} /> PyMC v5 · NUTS · ArviZ · semilla fija</div>
+            </Card>
+          </div>
+
+          <div className="space-y-3 lg:col-span-3">
+            <Card className="p-5">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">Estado del cronograma (7 semanas)</div>
+              <ul className="space-y-2.5">
+                {[
+                  { done: true, t: 'Sem. 1–2', d: 'Formulación, extracción de datos, modelo físico' },
+                  { done: true, t: 'Sem. 3–4', d: 'Implementación en PyMC y MCMC preliminar' },
+                  { done: false, t: 'Sem. 5', d: 'Chequeo predictivo posterior' },
+                  { done: false, t: 'Sem. 6', d: 'Contracción posterior/prior y validación hacia adelante' },
+                  { done: false, t: 'Sem. 7', d: 'Dashboard P(FoS ≤ 1) e informe final' },
+                ].map((s) => (
+                  <li key={s.t} className="flex items-start gap-3">
+                    <span className={`mt-0.5 ${s.done ? 'text-emerald-300' : 'text-slate-600'}`}><Icon name={s.done ? 'CheckCircle2' : 'Circle'} size={18} /></span>
+                    <span className="text-sm text-slate-300"><b className={s.done ? 'text-slate-100' : 'text-slate-400'}>{s.t}</b> · {s.d}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+            <Card tone="orange" className="p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-orange-300"><Icon name="GitBranch" size={16} /> Modelos rivales a comparar</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {['Sin jerarquía (αᵢ única)', 'Normal sin truncar', 'Student-t (colas pesadas)', 'Avance 1 (solo Cortinas)'].map((m) => (
+                  <div key={m} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-300">{m}</div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-slate-500">Criterio: capacidad de predecir las dos mediciones de validación de Cortinas.</p>
+            </Card>
+          </div>
+        </div>
+      </SlideShell>
+    );
+
+    /* ---------- 11 · Jaque Mate ---------- */
+    // Curvas leídas de la corrida preliminar (agd_cortinas_jaque_mate.png). Son ilustrativas, no inferencia nueva.
+    const MEAN_LINE = (t) => Math.max(0, 17.5 - 1.35 * t);
+    const CONE_UP = (t) => 23.5 - 1.25 * t;
+    const CONE_LO = (t) => Math.max(0, 11.3 - 1.8 * t);
+    const BAND_UP_PTS = [[0, 28.2], [1, 26.5], [2, 24.8], [3, 23], [4, 21], [5, 18.8], [6, 17.6], [7, 17.0], [8, 16.8]];
+    const BAND_LO_PTS = [[0, 6.4], [1, 4.8], [2, 3.2], [3, 2.2], [4, 1.4], [5, 0.6], [6, 0], [8, 0]];
+    const BAND_UP = (t) => interp(BAND_UP_PTS, t);
+    const BAND_LO = (t) => interp(BAND_LO_PTS, t);
+    const PHI_MEDIA = (PHI_PICO + PHI_RESIDUAL) / 2;   // fricción fija de la figura (≈ 26.05°)
+    const FOS_OF_C = (c) => termCohesion(c) + termFriccion(PHI_MEDIA);
+
+    const TRAIN_PTS = [{ t: 0, c: 18.5 }, { t: 3.84, c: 12.1 }];
+    const VAL_PTS = [{ t: 5.84, c: 16.3 }, { t: 7.84, c: 17.2 }];
+
+    const SlideJaque = () => {
+      const [view, setView] = useState('c');
+      const [layers, setLayers] = useState({ cone: true, band: true, mean: true, train: true });
+      const [revealed, setRevealed] = useState(false);
+      const toggleLayer = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
+
+      const W = 640, H = 350, m = { l: 54, r: 20, t: 16, b: 44 };
+      const iw = W - m.l - m.r, ih = H - m.t - m.b;
+      const isC = view === 'c';
+      const yMin = isC ? 0 : 0.8, yMax = isC ? 30 : 1.12;
+      const tf = isC ? (c) => c : FOS_OF_C;
+      const X = (t) => m.l + (t / 8) * iw;
+      const Y = (c) => m.t + (1 - (tf(c) - yMin) / (yMax - yMin)) * ih;
+      const ts = useMemo(() => Array.from({ length: 81 }, (_, i) => i / 10), []);
+      const poly = (fn) => ts.map((t) => `${X(t).toFixed(1)},${Y(fn(t)).toFixed(1)}`).join(' ');
+      const conePoly = `${poly(CONE_UP)} ${[...ts].reverse().map((t) => `${X(t).toFixed(1)},${Y(CONE_LO(t)).toFixed(1)}`).join(' ')}`;
+      const yTicks = isC ? [0, 5, 10, 15, 20, 25, 30] : [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1];
+
+      const verdict = (pt) => {
+        if (pt.c > BAND_UP(pt.t)) return { txt: 'por encima de la banda predictiva', tone: 'red' };
+        if (pt.c >= CONE_UP(pt.t) - 0.2) return { txt: 'sobre el borde superior del cono', tone: 'orange' };
+        return { txt: 'dentro del cono', tone: 'green' };
+      };
+
+      const LayerBtn = ({ k, label, color }) => (
+        <button onClick={() => toggleLayer(k)}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition cursor-pointer ${layers[k] ? 'border-slate-600 bg-slate-800/70 text-slate-200' : 'border-slate-800 text-slate-600'}`}>
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: layers[k] ? color : '#334155' }} /> {label}
+        </button>
+      );
+
+      return (
+        <SlideShell n={11} kicker="Validación fuera de muestra" title="Jaque mate: la realidad contradice la recta"
+          sub="Cortinas después del colapso (t = 3.84): lo que predice el modelo vs. lo que se midió.">
+          <div className="grid gap-4 lg:grid-cols-5">
+            <Card className="p-3 sm:p-4 lg:col-span-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <SegTabs value={view} onChange={setView}
+                  options={[{ id: 'c', label: 'Cohesión (kPa)', icon: 'Activity' }, { id: 'fos', label: 'FoS', icon: 'Scale' }]} />
+                <button onClick={() => setRevealed((r) => !r)}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold transition cursor-pointer ${revealed ? 'border-slate-700 text-slate-300 hover:border-slate-500' : 'border-rose-400/50 bg-rose-400/15 text-rose-200 hover:bg-rose-400/25'}`}>
+                  <Icon name={revealed ? 'EyeOff' : 'Eye'} size={15} /> {revealed ? 'Ocultar validación' : 'Revelar validación'}
+                </button>
+              </div>
+
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Cono de degradación del modelo contra los puntos de validación de Cortinas">
+                {/* grilla */}
+                {yTicks.map((v) => {
+                  const yy = m.t + (1 - (v - yMin) / (yMax - yMin)) * ih;
+                  return (
+                    <g key={v}>
+                      <line x1={m.l} x2={W - m.r} y1={yy} y2={yy} stroke="#1e293b" />
+                      <text x={m.l - 8} y={yy + 4} textAnchor="end" fontSize="12" fill="#64748b">{isC ? v : v.toFixed(2)}</text>
+                    </g>
+                  );
+                })}
+                {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((v) => (
+                  <g key={v}>
+                    <line x1={X(v)} x2={X(v)} y1={m.t} y2={m.t + ih} stroke="#111a2c" />
+                    <text x={X(v)} y={m.t + ih + 18} textAnchor="middle" fontSize="12" fill="#64748b">{v}</text>
+                  </g>
+                ))}
+                <text x={m.l + iw / 2} y={H - 8} textAnchor="middle" fontSize="12" fill="#64748b">t (años desde 2017-03-01)</text>
+                <text transform={`translate(14 ${m.t + ih / 2}) rotate(-90)`} textAnchor="middle" fontSize="12" fill="#64748b">{isC ? 'Cohesión c (kPa)' : 'FoS (φ fija ≈ 26.1°)'}</text>
+
+                {!isC && (
+                  <g>
+                    <line x1={m.l} x2={W - m.r} y1={Y((1 - termFriccion(PHI_MEDIA)) * K_COH)} y2={Y((1 - termFriccion(PHI_MEDIA)) * K_COH)} stroke="#fb7185" strokeDasharray="6 5" />
+                    <text x={m.l + 120} y={Y((1 - termFriccion(PHI_MEDIA)) * K_COH) - 6} textAnchor="start" fontSize="11" fill="#fb7185">FoS = 1</text>
+                  </g>
+                )}
+
+                {/* banda predictiva */}
+                {layers.band && (
+                  <g>
+                    <polyline points={poly(BAND_UP)} fill="none" stroke="#94a3b8" strokeDasharray="5 5" strokeWidth="1.3" />
+                    <polyline points={poly(BAND_LO)} fill="none" stroke="#94a3b8" strokeDasharray="5 5" strokeWidth="1.3" />
+                  </g>
+                )}
+                {/* cono HDI */}
+                {layers.cone && <polygon points={conePoly} fill="#fdba74" fillOpacity="0.25" stroke="#fdba74" strokeOpacity="0.35" />}
+                {/* media */}
+                {layers.mean && <polyline points={poly(MEAN_LINE)} fill="none" stroke="#fdba74" strokeWidth="3" strokeLinecap="round" />}
+
+                {/* colapso */}
+                <line x1={X(3.84)} x2={X(3.84)} y1={m.t} y2={m.t + ih} stroke="#cbd5e1" strokeDasharray="2 4" />
+                <text x={X(3.84) + 6} y={m.t + 14} fontSize="11" fill="#cbd5e1">colapso t = 3.84</text>
+
+                {/* entrenamiento */}
+                {layers.train && TRAIN_PTS.map((p) => (
+                  <circle key={p.t} cx={X(p.t)} cy={Y(p.c)} r="7" fill="#38bdf8" stroke="#0b1220" strokeWidth="2" />
+                ))}
+
+                {/* validación */}
+                {revealed && VAL_PTS.map((p, i) => (
+                  <g key={p.t}>
+                    <g className="pulse-ring"><circle cx={X(p.t)} cy={Y(p.c)} r="9" fill="none" stroke="#fb7185" strokeWidth="2" /></g>
+                    <g className="anim-pop" style={{ animationDelay: `${i * 0.35}s` }}>
+                      <rect x={X(p.t) - 8} y={Y(p.c) - 8} width="16" height="16" fill="#fb7185" stroke="#0b1220" strokeWidth="2" transform={`rotate(45 ${X(p.t)} ${Y(p.c)})`} />
+                    </g>
+                    <text x={X(p.t)} y={Y(p.c) - 16} textAnchor="middle" fontSize="12" fontWeight="700" fill="#fda4af">t = {p.t}</text>
+                  </g>
+                ))}
+              </svg>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                <LayerBtn k="cone" label="Cono HDI 94 %" color="#fdba74" />
+                <LayerBtn k="band" label="Banda predictiva" color="#94a3b8" />
+                <LayerBtn k="mean" label="Media AGD lineal" color="#fdba74" />
+                <LayerBtn k="train" label="Entrenamiento" color="#38bdf8" />
+              </div>
+            </Card>
+
+            <div className="space-y-3 lg:col-span-2">
+              {VAL_PTS.map((p) => {
+                const pred = MEAN_LINE(p.t);
+                const v = verdict(p);
+                const show = revealed;
+                const val = isC ? p.c : FOS_OF_C(p.c);
+                const pr = isC ? pred : FOS_OF_C(pred);
+                const dlt = val - pr;
+                return (
+                  <Card key={p.t} tone={show ? v.tone : 'gray'} className="p-4 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono-sci text-sm text-slate-400">t = {p.t} años</span>
+                      {show ? <Chip tone={v.tone} icon="AlertTriangle">{v.txt}</Chip> : <Chip tone="gray" icon="Lock">oculto</Chip>}
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div><div className="text-[11px] text-slate-500">Modelo (media)</div><div className="font-mono-sci text-xl font-bold text-orange-300">{fmt(pr, isC ? 1 : 3)}</div></div>
+                      <div><div className="text-[11px] text-slate-500">Medido</div><div className="font-mono-sci text-xl font-bold text-rose-300">{show ? fmt(val, isC ? 1 : 3) : '—'}</div></div>
+                      <div><div className="text-[11px] text-slate-500">Diferencia</div><div className="font-mono-sci text-xl font-bold text-slate-100">{show ? `+${fmt(dlt, isC ? 1 : 3)}` : '—'}</div></div>
+                    </div>
+                  </Card>
+                );
+              })}
+
+              <Card tone="orange" className="p-4">
+                <ul className="space-y-2.5">
+                  <Bullet icon="TrendingDown" tone="orange">Modelo: caída monótona (≈ 12 → 9.6 → 6.9 kPa).</Bullet>
+                  <Bullet icon="TrendingUp" tone="red">Realidad: 12.1 → <b className="text-slate-100">16.3 → 17.2 kPa</b>. La cohesión sube.</Bullet>
+                  <Bullet icon="Droplets" tone="blue">Hipótesis: recuperación de resistencia (p. ej. succión), que una recta decreciente no representa.</Bullet>
+                </ul>
+              </Card>
+              <p className="px-1 text-[11px] leading-snug text-slate-600">Curvas leídas de la corrida preliminar (AGD lineal, α₀ de Cortinas y δ regional); valores aproximados. Conclusión pendiente de chequeos predictivos y comparación de modelos.</p>
+            </div>
+          </div>
+        </SlideShell>
+      );
+    };
+
+    /* ---------- 12 · Cierre ---------- */
+    const SlideCierre = () => (
+      <SlideShell n={12} kicker="Conclusiones" title="Un modelo que aprende de la región… y se deja contradecir por los datos">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card tone="blue" className="p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-sky-300"><Icon name="Sparkles" size={17} /> Aportes</div>
+            <ul className="space-y-3">
+              <Bullet icon="Network" tone="blue">Tasa regional δ desde una serie de tiempo mínima, separando lo estimado de lo extrapolado.</Bullet>
+              <Bullet icon="Scale" tone="blue">Cohesión → P(FoS &lt; 1) con escenarios de fricción pico y residual.</Bullet>
+              <Bullet icon="ShieldCheck" tone="blue">Contraste out-of-sample con Cortinas post-falla.</Bullet>
+            </ul>
+          </Card>
+          <Card tone="orange" className="p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-orange-300"><Icon name="AlertTriangle" size={17} /> Limitaciones</div>
+            <ul className="space-y-3">
+              <Bullet icon="Minus" tone="orange">δ informada por una sola caída (Cortinas).</Bullet>
+              <Bullet icon="Minus" tone="orange">Supone Cortinas representativo de la región.</Bullet>
+              <Bullet icon="Minus" tone="orange">FoS sensible a β y z; nivel absoluto no calibrado.</Bullet>
+              <Bullet icon="Minus" tone="orange">3 ceros de origen SPT por verificar.</Bullet>
+            </ul>
+          </Card>
+          <Card tone="green" className="p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300"><Icon name="Flag" size={17} /> Siguiente vuelta</div>
+            <ul className="space-y-3">
+              <Bullet icon="ChevronRight" tone="green">Prior predictive checks sobre los hiper-priors.</Bullet>
+              <Bullet icon="ChevronRight" tone="green">Sensibilidad a la prior de δ_región.</Bullet>
+              <Bullet icon="ChevronRight" tone="green">Comparar: sin jerarquía · Normal · Student-t.</Bullet>
+              <Bullet icon="ChevronRight" tone="green">Contracción posterior/prior y dashboard P(FoS ≤ 1).</Bullet>
+            </ul>
+          </Card>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat value="48" label="observaciones" tone="blue" />
+          <Stat value="27" label="taludes" tone="indigo" />
+          <Stat value="86 %" label="caída FoS por fricción" tone="orange" />
+          <Stat value="2" label="puntos que cuestionan la recta" tone="red" />
+        </div>
+
+        <div className="mt-6 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
+          <Icon name="Repeat" size={15} /> Proponer · ajustar · criticar · replantear — el ciclo de Box continúa.
+        </div>
+      </SlideShell>
+    );
+
+    /* =====================================================================
+     * 3. REGISTRO DE DIAPOSITIVAS Y CARRUSEL
+     * ===================================================================== */
+    const SLIDES = [
+      { id: 'portada', title: 'Portada', Comp: SlideCover },
+      { id: 'problema', title: 'El problema', Comp: SlideProblema },
+      { id: 'box', title: 'Ciclo de Box', Comp: SlideBox },
+      { id: 'datos', title: 'Datos', Comp: SlideDatos },
+      { id: 'small', title: 'Small Data', Comp: SlideSmallData },
+      { id: 'salto', title: 'Salto metodológico', Comp: SlideSalto },
+      { id: 'truncada', title: 'Normal truncada', Comp: SlideTruncada },
+      { id: 'fos', title: 'Sensibilidad FoS', Comp: SlideFoS },
+      { id: 'arq', title: 'Arquitectura', Comp: SlideArquitectura },
+      { id: 'inf', title: 'Inferencia', Comp: SlideInferencia },
+      { id: 'jaque', title: 'Jaque mate', Comp: SlideJaque },
+      { id: 'cierre', title: 'Conclusiones', Comp: SlideCierre },
+    ];
+
+    function App() {
+      const total = SLIDES.length;
+      // Permite abrir una diapositiva concreta con presentacion.html#5
+      const [state, setState] = useState(() => {
+        const n = parseInt(window.location.hash.replace('#', ''), 10);
+        return { current: Number.isFinite(n) ? clamp(n - 1, 0, total - 1) : 0, dir: 1 };
+      });
+      const { current, dir } = state;
+      useEffect(() => { window.history.replaceState(null, '', `#${current + 1}`); }, [current]);
+      const mainRef = useRef(null);
+      const touch = useRef(null);
+
+      const go = useCallback((n) => {
+        setState((s) => {
+          const next = clamp(n, 0, total - 1);
+          return next === s.current ? s : { current: next, dir: next > s.current ? 1 : -1 };
+        });
+      }, [total]);
+      const next = useCallback(() => setState((s) => (s.current < total - 1 ? { current: s.current + 1, dir: 1 } : s)), [total]);
+      const prev = useCallback(() => setState((s) => (s.current > 0 ? { current: s.current - 1, dir: -1 } : s)), []);
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range') return;
+          if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); next(); }
+          else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+          else if (e.key === 'Home') go(0);
+          else if (e.key === 'End') go(total - 1);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [next, prev, go, total]);
+
+      useEffect(() => { if (mainRef.current) mainRef.current.scrollTop = 0; }, [current]);
+
+      const onTouchStart = (e) => {
+        if (e.target.closest && e.target.closest('input[type=range]')) { touch.current = null; return; }
+        const t = e.touches[0];
+        touch.current = { x: t.clientX, y: t.clientY };
+      };
+      const onTouchEnd = (e) => {
+        if (!touch.current) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - touch.current.x;
+        const dy = t.clientY - touch.current.y;
+        touch.current = null;
+        if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) (dx < 0 ? next : prev)();
+      };
+
+      const { Comp } = SLIDES[current];
+      const progress = ((current + 1) / total) * 100;
+
+      return (
+        <div className="relative flex h-dvh flex-col bg-[#070b14]" style={{ backgroundImage: 'radial-gradient(1200px 500px at 85% -10%, rgba(56,189,248,.10), transparent), radial-gradient(900px 500px at -10% 110%, rgba(253,186,116,.08), transparent)' }}>
+          {/* Barra superior */}
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800/80 px-4 py-2.5 sm:px-8">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-400/15 text-sky-300"><Icon name="Mountain" size={16} /></span>
+              <span className="truncate text-sm font-semibold text-slate-200">AGD-Sentinel V2</span>
+              <span className="hidden text-slate-700 sm:inline">/</span>
+              <span className="hidden truncate text-sm text-slate-500 sm:inline">{SLIDES[current].title}</span>
+            </div>
+            <span className="font-mono-sci text-xs text-slate-500">{String(current + 1).padStart(2, '0')} / {total}</span>
+          </header>
+          <div className="h-0.5 w-full shrink-0 bg-slate-900">
+            <div className="h-full bg-gradient-to-r from-sky-400 to-orange-300 transition-all duration-500" style={{ width: `${progress}%` }} />
+          </div>
+
+          {/* Área de diapositiva */}
+          <main ref={mainRef} className="thin-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+            <div key={current} className={`min-h-full ${dir > 0 ? 'anim-in-right' : 'anim-in-left'}`}>
+              <Comp />
+            </div>
+          </main>
+
+          {/* Navegación */}
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-800/80 bg-slate-950/70 px-3 py-2.5 backdrop-blur sm:px-8">
+            <button onClick={prev} disabled={current === 0} aria-label="Diapositiva anterior"
+              className="flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+              <Icon name="ChevronLeft" size={18} /> <span className="hidden sm:inline">Anterior</span>
+            </button>
+
+            <nav className="flex min-w-0 flex-1 items-center justify-center gap-1.5 sm:gap-2" aria-label="Diapositivas">
+              {SLIDES.map((s, i) => (
+                <button key={s.id} onClick={() => go(i)} aria-label={`Ir a ${s.title}`} aria-current={i === current ? 'true' : undefined}
+                  className={`h-2 rounded-full transition-all cursor-pointer ${i === current ? 'w-6 bg-orange-300' : i < current ? 'w-2 bg-sky-400/60 hover:bg-sky-300' : 'w-2 bg-slate-700 hover:bg-slate-500'}`} />
+              ))}
+            </nav>
+
+            <button onClick={next} disabled={current === total - 1} aria-label="Diapositiva siguiente"
+              className="flex items-center gap-1.5 rounded-xl border border-sky-400/40 bg-sky-400/15 px-3 py-2 text-sm font-medium text-sky-100 transition hover:bg-sky-400/25 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+              <span className="hidden sm:inline">Siguiente</span> <Icon name="ChevronRight" size={18} />
+            </button>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
