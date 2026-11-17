@@ -18,8 +18,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("agrupacion_validacion")
 
-BASE_DIR = Path(__file__).resolve().parent
-DIR_SALIDA = BASE_DIR / "datosfinales"
+RAIZ = Path(__file__).resolve().parent.parent   # carpeta raíz del repositorio
+DIR_SALIDA = RAIZ / "datos" / "finales"
 RUTA_ENTRADA = DIR_SALIDA / "Dataset_Jerarquico_Maestro3.csv"
 RUTA_ENTRENAMIENTO = DIR_SALIDA / "Dataset_Jerarquico_Maestro_Final.csv"
 RUTA_VALIDACION = DIR_SALIDA / "Dataset_Validacion_Cortinas.csv"

@@ -1,0 +1,7 @@
+pymc>=5.16,<6
+arviz>=0.20,<1
+numpy>=1.26,<2.3
+pandas
+scipy
+matplotlib
+openpyxl

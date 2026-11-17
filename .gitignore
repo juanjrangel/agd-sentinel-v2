@@ -1,0 +1,11 @@
+# Salidas que el código vuelve a generar
+resultados/
+figuras/
+
+# Archivos intermedios de la depuración de datos
+datos/finales/Dataset_Jerarquico_Maestro.csv
+datos/finales/Dataset_Jerarquico_Maestro2.csv
+datos/finales/Dataset_Jerarquico_Maestro3.csv
+
+__pycache__/
+.ipynb_checkpoints/

@@ -2,7 +2,7 @@
 
 Dependencias: pandas, openpyxl.
 Ejecución:
-    uv run --with pandas --with openpyxl python unificar_dataset_jerarquico.py
+    python scripts/unificar_dataset_jerarquico.py   (desde la raíz del repositorio)
 
 Convención de fecha incompleta: un año suelto se ancla al 1 de enero y un
 mes/año al día 1 de ese mes. Es el inicio del intervalo conocido, el mismo
@@ -24,12 +24,13 @@ logging.basicConfig(
 )
 log = logging.getLogger("dataset_jerarquico")
 
-BASE_DIR = Path(__file__).resolve().parent
-RUTA_CORTINAS = BASE_DIR / "cortinas_campaign_data.csv"
-RUTA_LA_CHINA = BASE_DIR / "datos_la_china_depurados.csv"
-RUTA_CRUDOS = BASE_DIR / "Datos_Crudos_Extraidos.xlsx"
+RAIZ = Path(__file__).resolve().parent.parent   # carpeta raíz del repositorio
+DATOS_CRUDOS = RAIZ / "datos" / "crudos"
+RUTA_CORTINAS = DATOS_CRUDOS / "cortinas_campaign_data.csv"
+RUTA_LA_CHINA = DATOS_CRUDOS / "datos_la_china_depurados.csv"
+RUTA_CRUDOS = DATOS_CRUDOS / "Datos_Crudos_Extraidos.xlsx"
 HOJA_CRUDOS = "Datos_Crudos"
-DIR_SALIDA = BASE_DIR / "datosfinales"
+DIR_SALIDA = RAIZ / "datos" / "finales"
 RUTA_SALIDA = DIR_SALIDA / "Dataset_Jerarquico_Maestro.csv"
 
 COLUMNAS = ["Sitio", "Fecha", "Peso_Unitario", "Cohesion", "Friccion", "t"]

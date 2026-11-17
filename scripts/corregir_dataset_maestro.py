@@ -4,7 +4,7 @@
 2. Unifica cualquier Sitio que contenga "Cortinas" en el grupo "Cortinas".
 3. Ancla Cortinas 2017 a 2017-03-01 y recalcula t desde esa fecha.
 4. Regenera Sitio_idx con pd.factorize.
-5. Sobreescribe datosfinales/Dataset_Jerarquico_Maestro.csv.
+5. Lee datos/finales/Dataset_Jerarquico_Maestro.csv y escribe datos/finales/Dataset_Jerarquico_Maestro2.csv.
 """
 
 from __future__ import annotations
@@ -21,8 +21,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("corregir_maestro")
 
-BASE_DIR = Path(__file__).resolve().parent
-RUTA_MAESTRO = BASE_DIR / "datosfinales" / "Dataset_Jerarquico_Maestro.csv"
+RAIZ = Path(__file__).resolve().parent.parent   # carpeta raíz del repositorio
+DATOS_FINALES = RAIZ / "datos" / "finales"
+RUTA_ENTRADA = DATOS_FINALES / "Dataset_Jerarquico_Maestro.csv"
+RUTA_SALIDA = DATOS_FINALES / "Dataset_Jerarquico_Maestro2.csv"
 ORIGEN = pd.Timestamp("2017-03-01")
 DIAS_POR_ANIO = 365.25
 COLUMNAS_LIKELIHOOD = ["t", "Cohesion", "Friccion"]
@@ -97,7 +99,7 @@ def validar(df: pd.DataFrame) -> None:
 
 
 def main() -> pd.DataFrame:
-    df = pd.read_csv(RUTA_MAESTRO, encoding="utf-8")
+    df = pd.read_csv(RUTA_ENTRADA, encoding="utf-8")
     idx_max_antes = int(df["Sitio_idx"].max())
     sitios_antes = int(df["Sitio"].nunique())
     log.info(
@@ -118,7 +120,7 @@ def main() -> pd.DataFrame:
 
     idx_max_despues = int(df["Sitio_idx"].max())
     sitios_despues = int(df["Sitio"].nunique())
-    df.to_csv(RUTA_MAESTRO, index=False, encoding="utf-8")
+    df.to_csv(RUTA_SALIDA, index=False, encoding="utf-8")
     log.info(
         "Salida: filas=%s, sitios=%s, Sitio_idx_max=%s, reducido=%s",
         len(df),
