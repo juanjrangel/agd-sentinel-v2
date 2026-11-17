@@ -8,6 +8,8 @@ Modelo bayesiano jerárquico (PyMC) de la pérdida de cohesión en taludes coluv
 
 **Resultado principal:** la cohesión se pierde a 1.37 kPa/año (intervalo de credibilidad del 94 %: 0.36–2.40), pero Cortinas recuperó cohesión después de la falla (16.3 y 17.2 kPa medidos en 2023 y 2025, frente a 9.9 y 7.4 kPa predichos por la recta de deterioro).
 
+**Video de presentación (3 min 56 s):** https://drive.google.com/file/d/1EoiqDcpcDvUvqF6HcOy4uamhv1PmkbN_/view?usp=sharing
+
 ## Contenido
 
 ```
