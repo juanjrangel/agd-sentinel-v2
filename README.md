@@ -1,6 +1,6 @@
 # AGD-Sentinel V2 — Modelo jerárquico de deterioro geotécnico acumulado
 
-Proyecto final de Introducción a la Inferencia Bayesiana (Prof. David Romo Bucheli, PhD).
+Proyecto final de Métodos de Inferencia Bayesiana (Prof. David Romo Bucheli, PhD).
 
 Juan José Rangel (2243554) · Santiago Sepúlveda (2243557) · Jerónimo Andrés Mateo Bazán (2243590)
 
